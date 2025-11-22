@@ -123,7 +123,7 @@ def extract_repo_knowledge(repo_path):
     """Entry point to extract knowledge from a repository path."""
     if not os.path.exists(repo_path):
         print(f"Error: Path '{repo_path}' does not exist.")
-        exit(1)
+
     analysis_results = scan_repository(repo_path)
     with open('output.json', 'w', encoding='utf-8') as f:
         json.dump(analysis_results, f, ensure_ascii=False, indent=2)
