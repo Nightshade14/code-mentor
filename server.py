@@ -41,7 +41,6 @@ def find_relationships(knowledge: dict) -> KnowledgeGraph:
     try:
         client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
         
-        # PRAGMATIC FIX: Use the '002' models. They follow schemas significantly better than 'latest'.
         response = client.models.generate_content(
             model="gemini-3-pro-preview", 
             contents=f"Analyze this code structure and generate the dependency graph:\n\n{json.dumps(knowledge)}",
