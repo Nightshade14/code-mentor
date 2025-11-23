@@ -126,4 +126,5 @@ def extract_repo_knowledge(repo_path):
 
     analysis_results = scan_repository(repo_path)
     with open('output.json', 'w', encoding='utf-8') as f:
-        json.dump(analysis_results, f, ensure_ascii=False, indent=2)
+        json.dump(analysis_results, f, indent=2)
+    return analysis_results

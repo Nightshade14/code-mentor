@@ -211,3 +211,4 @@ __marimo__/
 graph.dot
 **/pytorch
 *.json
+**/temp.py
