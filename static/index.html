@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Mentor - Architecture Visualizer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Code Mentor</h1>
+            <p class="subtitle">Visualize your codebase architecture with AI</p>
+        </header>
+
+        <main>
+            <div class="input-section">
+                <input type="text" id="repoUrl" placeholder="Enter Repository URL or Path" autocomplete="off">
+                <button id="submitBtn">
+                    <span class="btn-text">Generate Graph</span>
+                    <div class="loader"></div>
+                </button>
+            </div>
+
+            <div id="error-message" class="hidden"></div>
+
+            <div id="result-section" class="hidden">
+                <h2>Architecture Diagram</h2>
+                <div class="image-container">
+                    <img id="archImage" src="" alt="Architecture Diagram">
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
