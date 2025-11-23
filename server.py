@@ -1,216 +1,150 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from helper import extract_repo_knowledge
+from helper import extract_repo_knowledge 
 from google import genai
 from google.genai import types
-from typing import List
+from typing import List, Optional
 from dotenv import load_dotenv
-load_dotenv()
-import json
+import os
 import graphviz
+import json
 
+load_dotenv()
+
+# --- 1. Define The Flat Schema (Edge List) ---
 class Relationship(BaseModel):
-    source: str = Field(description="The source entity (Class, Function, or Service). Use CamelCase.")
-    target: str = Field(description="The target entity being called (Database, API, or Class). Use CamelCase.")
-    label: str = Field(description="The relationship type (calls, reads_from, writes_to, depends_on). Max 3 words.")
+    source: str = Field(..., description="The source entity (Class, Function, or Service). Use CamelCase.")
+    target: str = Field(..., description="The target entity being called (Database, API, or Class). Use CamelCase.")
+    label: str = Field(..., description="The relationship type (calls, reads_from, writes_to, depends_on). Max 3 words.")
 
 class KnowledgeGraph(BaseModel):
-    relationships: List[Relationship] = Field(description="A list of all directed edges extracted from the code.")
+    relationships: List[Relationship] = Field(..., description="A flat list of all directed edges extracted from the code.")
 
-def find_relationships(knowledge: dict):
+# --- 2. Core Logic ---
+def find_relationships(knowledge: dict) -> KnowledgeGraph:
     """
-    Create a knowledge graph by identifying nodes and edges from the knowledge dictionary.
+    Extracts dependencies using Gemini with Strict Structured Output.
     """
+    
 
+    
     system_prompt = """
-    You are an Expert Software Architect and Knowledge Graph Engineer. Your task is to extract a semantic "Dependency Graph" from the JSON code representation provided by the user.
-
-    **YOUR GOAL:**
-    Convert the hierarchical JSON data provided by the user into a dictionary of relationships.
-
-    **ENTITY EXTRACTION RULES:**
-    1. **Source Entities:** Active agents (Classes like `PaymentService`, Functions like `process_order`).
-    2. **Target Entities:** Systems being called.
-    * *Internal:* Other classes/functions in the data.
-    * *External:* Libraries/APIs (e.g., `stripe`, `boto3`, `requests`).
-    * *Normalization:* Convert `stripe.Charge.create` -> `StripeAPI`. Convert `boto3.client` -> `AWS_S3`. Convert `db.query` -> `Database`.
-
-    **RELATIONSHIP INFERENCE RULES (Edge Labels):**
-    - **Standard Call:** A calls B -> label: `calls`.
-    - **Data Flow:** Reading data -> label: `reads_from`.
-    - **Data Mutation:** Writing data -> label: `writes_to`.
-    - **Dependency:** Imports/Instantiations -> label: `depends_on`.
-
-    **FILTERING (CRITICAL):**
-    - **IGNORE** technical noise: `print`, `logging`, `len`, `str`, `int`, `list`.
-    - **IGNORE** internal language features unless they represent major logic.
-
-    **CRITICAL COMPATIBILITY RULES:**
-    1. **Clean Names:** Use CamelCase (e.g., "PaymentService"). No spaces or special chars.
-    2. **Short Labels:** Max 3 words.
-    3. **Direction:** Always Source -> Target.
-    """
-
-    prompt = f"""
-    **INPUT DATA (JSON):**
-    {knowledge}
+    You are an Expert Software Architect. Your goal is to output a FLAT list of dependencies based on the provided code structure.
+    
+    RULES:
+    1. Output strict JSON matching the KnowledgeGraph schema.
+    2. Flatten all nested calls into direct Source -> Target relationships.
+    3. Normalize names: 'stripe.Charge.create' becomes 'StripeAPI'.
+    4. Ignore trivial logs/prints.
     """
 
     try:
-        client = genai.Client()
+        client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+        
+        # PRAGMATIC FIX: Use the '002' models. They follow schemas significantly better than 'latest'.
         response = client.models.generate_content(
-            model="gemini-2.5-flash-preview-09-2025",
-            contents=prompt,
+            model="gemini-3-pro-preview", 
+            contents=f"Analyze this code structure and generate the dependency graph:\n\n{json.dumps(knowledge)}",
             config=types.GenerateContentConfig(
                 system_instruction=system_prompt,
                 response_mime_type="application/json",
-                response_schema=KnowledgeGraph
+                response_schema=KnowledgeGraph,
+                thinkingConfig={
+                    "includeThoughts": False,
+                    "thinkingLevel": "LOW"
+                }
             )
         )
-    except Exception as e:
-        print(f"LLM API call Error: {e}")
-        return {
-            "status": "error",
-            "message": str(e)
-        }  
-
-    with open('relationships.json', 'w', encoding='utf-8') as f:
-        f.write(response.text)
-    
-    try:
-        # data_dict = json.loads(response.text)
-        # result = KnowledgeGraph.model_validate(data_dict)
-        return response.text
-
-    except Exception as e:
-        print(f"Error: {e}")
         
+        # The SDK now parses this automatically into your Pydantic model
+        if response.parsed:
+            return response.parsed
+        else:
+            # Fallback if parsing fails but text exists (rare with 002 models)
+            return KnowledgeGraph.model_validate_json(response.text)
 
+    except Exception as e:
+        print(f"LLM Extraction Error: {e}")
+        # Return empty graph on failure to prevent API crash
+        return KnowledgeGraph(relationships=[])
 
-
-def render_architecture_graph(llm_output, output_filename="architecture_diagram"):
+def render_architecture_graph(graph_data: KnowledgeGraph, output_filename="gem_3_architecture_diagram"):
     """
-    Renders a Graphviz diagram from the LLM's JSON output.
-    
-    Args:
-        llm_output (dict): The JSON object containing "relationships"
-
-        output_filename (str): Base name for the output file (no extension)
+    Renders a Graphviz diagram. Accepts the Pydantic object directly.
     """
-    
     dot = graphviz.Digraph(comment='Architecture Auto-Draftsman')
     
-    dot.attr(rankdir='LR')           # Left-to-Right layout (Input -> Logic -> Data)
-    dot.attr(splines='ortho')        # Orthogonal lines (Right angles, circuit-board look)
-    dot.attr('node', 
-            shape='box', 
-            style='filled', 
-            fillcolor='#E8F5E9',
-            fontname='Helvetica',
-            penwidth='1.5')
-    dot.attr('edge', 
-            fontname='Helvetica', 
-            fontsize='10',
-            color='#455A64',
-            arrowsize='0.8')
+    # Styling
+    dot.attr(rankdir='LR', splines='ortho')
+    dot.attr('node', shape='box', style='filled', fontname='Helvetica')
+    dot.attr('edge', fontname='Helvetica', fontsize='10', color='#455A64')
 
-    def get_shape_and_color(node_name):
-        name_lower = node_name.lower()
-        
-        # Rule 1: Databases -> Cylinders (Yellow/Gold)
-        if any(x in name_lower for x in ['db', 'database', 'sql', 'store', 'redis']):
-            return 'cylinder', '#FFF9C4'
-        
-        # Rule 2: External APIs -> Component/Tab (Light Blue)
-        if any(x in name_lower for x in ['api', 'stripe', 'aws', 's3', 'external']):
-            return 'component', '#E1F5FE'
-            
-        # Rule 3: Frontend/Users -> Oval (Light Grey)
-        if any(x in name_lower for x in ['user', 'client', 'frontend', 'app']):
-            return 'oval', '#F5F5F5'
-            
-        # Default: Services -> Box (Light Green)
-        return 'box', '#E8F5E9'
+    def get_style(node_name):
+        n = node_name.lower()
+        if any(x in n for x in ['db', 'database', 'sql', 'redis']): return 'cylinder', '#FFF9C4' # Yellow
+        if any(x in n for x in ['api', 'stripe', 'aws', 's3']): return 'component', '#E1F5FE'   # Blue
+        if any(x in n for x in ['user', 'client', 'front']): return 'oval', '#F5F5F5'           # Grey
+        return 'box', '#E8F5E9' # Green default
 
-    if isinstance(llm_output, str):
-        try:
-            llm_output = json.loads(llm_output)
-        except json.JSONDecodeError:
-            print("Error: llm_output is not a valid JSON string.")
-            return None
-
-    edges = llm_output.get("relationships", {})
-
+    # Extract relationships list from Pydantic model
+    edges = graph_data.relationships
     added_nodes = set()
 
-    for edge_dict in edges:
-        # Style Source Node
-        if edge_dict["source"] not in added_nodes:
-            shape, color = get_shape_and_color(edge_dict["source"])
-            dot.node(edge_dict["source"], shape=shape, fillcolor=color)
-            added_nodes.add(edge_dict["source"])
+    for edge in edges:
+        # Add Source
+        if edge.source not in added_nodes:
+            s, c = get_style(edge.source)
+            dot.node(edge.source, shape=s, fillcolor=c)
+            added_nodes.add(edge.source)
         
-        # Style Target Node
-        if edge_dict["target"] not in added_nodes:
-            shape, color = get_shape_and_color(edge_dict["target"])
-            dot.node(edge_dict["target"], shape=shape, fillcolor=color)
-            added_nodes.add(edge_dict["target"])
+        # Add Target
+        if edge.target not in added_nodes:
+            s, c = get_style(edge.target)
+            dot.node(edge.target, shape=s, fillcolor=c)
+            added_nodes.add(edge.target)
         
         # Add Edge
-        dot.edge(edge_dict["source"], edge_dict["target"], label=edge_dict["label"])
+        dot.edge(edge.source, edge.target, label=edge.label)
 
     try:
+        # Renders to file (e.g., architecture_diagram.png)
         output_path = dot.render(output_filename, format='png', view=False)
-        success_msg = "Success! Diagram generated"
-        print(success_msg)
-        return success_msg
+        return output_path
     except Exception as e:
-        error_msg = f"Error rendering graph: {e}"
-        print(error_msg)
+        print(f"Graphviz Error: {e}")
+        return None
 
-
+# --- 3. API Setup ---
 app = FastAPI()
 
 class KnowledgeRequest(BaseModel):
-    """Request model for extract_knowledge endpoint"""
     repo_path: str
-
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint to verify the server is running"""
-    return {
-        "status": "healthy",
-        "message": "Server is running"
-    }
-
 
 @app.post("/extract_knowledge")
 async def extract_knowledge(request: KnowledgeRequest):
-    """
-    Extract knowledge from the provided repository path
-    
-    Args:
-        request: KnowledgeRequest containing the repository path to process
-        
-    Returns:
-        dict: Extracted knowledge data
-    """
-
     try:
-        knowledge = extract_repo_knowledge(request.repo_path)
-        relationships = find_relationships(knowledge)
-        final_result = KnowledgeGraph(relationships=relationships)
+        # 1. Get Raw Knowledge (AST/File dict)
+        raw_knowledge = extract_repo_knowledge(request.repo_path)
+        
+        # 2. Get Flat Relationships (Pydantic Object)
+        graph_data: KnowledgeGraph = find_relationships(raw_knowledge)
+        
+        # 3. Generate Diagram (Optional - Side Effect)
+        diagram_path = render_architecture_graph(graph_data)
 
+        # 4. Return JSON
         return {
             "status": "success",
-            "knowledge": final_result
+            "node_count": len(graph_data.relationships),
+            "diagram_path": diagram_path,
+            "knowledge": graph_data.model_dump() # Convert Pydantic -> Dict for JSON response
         }
 
     except Exception as e:
-        print(f"Error extracting knowledge: {e}")
-
-
+        # Log the full error for your hackathon debugging
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

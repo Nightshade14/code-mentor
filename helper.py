@@ -125,6 +125,6 @@ def extract_repo_knowledge(repo_path):
         print(f"Error: Path '{repo_path}' does not exist.")
 
     analysis_results = scan_repository(repo_path)
-    with open('output.json', 'w', encoding='utf-8') as f:
-        json.dump(analysis_results, f, indent=2)
+    # with open('output.json', 'w', encoding='utf-8') as f:
+    #     json.dump(analysis_results, f, indent=2)
     return analysis_results

@@ -212,3 +212,4 @@ graph.dot
 **/pytorch
 *.json
 **/temp.py
+**/ideal
